@@ -43,16 +43,6 @@ To run the demo application:
 ./scripts/run.sh demo
 ```
 
-### Run Assignments
-
-To run a specific assignment:
-
-```bash
-./scripts/run.sh <assignment_name>
-```
-
-Replace `<assignment_name>` with the name of the assignment you want to run.
-
 ## Project Structure
 
 - `demos/` - Demo applications and resources

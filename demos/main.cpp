@@ -54,6 +54,7 @@ public:
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/billboard.vert", "shaders/alphablend.frag", "billboard");
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/terrain.vert", "shaders/terrain.frag", "terrain");
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/skybox.vert", "shaders/skybox.frag", "skybox");
+        OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/skybox.vert", "shaders/stars_skybox.frag", "stars_skybox");
 
         //// Load all the textures you need for the scene
         //// In the function call of Add_Shader_From_File(), we specify two names:
@@ -98,12 +99,20 @@ public:
         }
         */
 
-        //// Background Option (2): Programmable Canvas
-        //// By default, we load a number of stars
+        //// Background Option (2): Programmable Canvas (Stars only - non Skybox)
+        /*
         {
             bgEffect = Add_Interactive_Object<OpenGLBgEffect>();
             bgEffect->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("stars"));
             bgEffect->Initialize();
+        }
+        */
+
+        //// Skybox Stars: procedural stars rendered on a rotating skybox
+        {
+            skybox = Add_Interactive_Object<OpenGLSkybox>();
+            skybox->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("stars_skybox"));
+            skybox->Initialize();
         }
         
         //// Background Option (4): Sky sphere

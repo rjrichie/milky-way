@@ -21,12 +21,35 @@
 #define CLOCKS_PER_SEC 100000
 #endif
 
+#define PI 3.14159265359
+
+struct PlanetInfo {
+    std::string texture_name;
+    float size;                 // Relative to sun
+    float semi_major_axis;      // Distance from center
+    float inclination;          // Tilt off of orbital plane (degrees)
+    float a;                    // Longitude of Ascending Node - AKA Swivel (degrees)
+    float start_anomaly;        // Starting position on orbit (degrees)
+    float orbit_period_days;    // How long to orbit sun
+    float axial_tilt;           // In degrees
+    float axial_period_days;    // Length of a day
+};
+
+struct Planet {
+    OpenGLTriangleMesh* mesh;
+    PlanetInfo info;
+};
+
 class MyDriver : public OpenGLViewer
 {
     std::vector<OpenGLTriangleMesh *> mesh_object_array;
     OpenGLBgEffect *bgEffect = nullptr;
     OpenGLSkybox *skybox = nullptr;
     clock_t startTime;
+
+    std::vector<Planet> planets;
+    float global_time_days = 0.0f;
+    float days_per_frame = 2.0f / 24.0f; // speed of simulation in days per frame - 2 hours per frame
 
 public:
     virtual void Initialize()
@@ -64,23 +87,17 @@ public:
         //// object->Add_Texture("tex_sampler", OpenGLTextureLibrary::Get_Texture("tex_name"));
         //// Here "tex_sampler" is the name of the texture sampler2D you used in your shader, and
         //// "tex_name" needs to be one of the texture names you created previously with Add_Texture_From_File()
-
-        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/earth_color.png", "sphere_color");
-        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/earth_normal.png", "sphere_normal");
-        //// load buzz/background texture used by the stars shader so sampler is explicitly bound
-        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/buzz_color.png", "buzz_color");
-
-
-        //// Add all the lights you need for the scene (no more than 4 lights)
-        //// The four parameters are position, ambient, diffuse, and specular.
-        //// The lights you declared here will be synchronized to all shaders in uniform lights.
-        //// You may access these lights using lt[0].pos, lt[1].amb, lt[1].dif, etc.
-        //// You can also create your own lights by directly declaring them in a shader without using Add_Light().
-        //// Here we declared three default lights for you. Feel free to add/delete/change them at your will.
-
-        opengl_window->Add_Light(Vector3f(3, 1, 3), Vector3f(0.1, 0.1, 0.1), Vector3f(1, 1, 1), Vector3f(0.5, 0.5, 0.5)); 
-        opengl_window->Add_Light(Vector3f(0, 0, -5), Vector3f(0.1, 0.1, 0.1), Vector3f(0.9, 0.9, 0.9), Vector3f(0.5, 0.5, 0.5));
-        opengl_window->Add_Light(Vector3f(-5, 1, 3), Vector3f(0.1, 0.1, 0.1), Vector3f(0.9, 0.9, 0.9), Vector3f(0.5, 0.5, 0.5));
+        
+        // Load planet textures
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/sun_color.jpg", "sun_color");
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/mercury_color.jpg", "mercury_color");
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/venus_color.jpg", "venus_color");
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/earth_color.png", "earth_color");
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/mars_color.jpg", "mars_color");
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/jupiter_color.jpg", "jupiter_color");
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/saturn_color.jpg", "saturn_color");
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/uranus_color.jpg", "uranus_color");
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/neptune_color.jpg", "neptune_color");
 
         //// Add the background / environment
         //// Here we provide you with four default options to create the background of your scene:
@@ -89,24 +106,6 @@ public:
         //// (3) Sky box (cubemap; if you want to load six background images for a skybox, use this one)
         //// (4) Sky sphere (if you want to implement a sky sphere, enlarge the size of the sphere to make it colver the entire scene and update its shaders for texture colors)
         //// By default, Option (2) (Buzz stars) is turned on, and all the other three are commented out.
-        
-        //// Background Option (1): Gradient color
-        /*
-        {
-            auto bg = Add_Interactive_Object<OpenGLBackground>();
-            bg->Set_Color(OpenGLColor(0.1f, 0.1f, 0.1f, 1.f), OpenGLColor(0.3f, 0.1f, .1f, 1.f));
-            bg->Initialize();
-        }
-        */
-
-        //// Background Option (2): Programmable Canvas (Stars only - non Skybox)
-        /*
-        {
-            bgEffect = Add_Interactive_Object<OpenGLBgEffect>();
-            bgEffect->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("stars"));
-            bgEffect->Initialize();
-        }
-        */
 
         //// Skybox Stars: procedural stars rendered on a rotating skybox
         {
@@ -116,53 +115,16 @@ public:
         }
         
         //// Background Option (4): Sky sphere
-        //// Here we provide a default implementation of a textured sphere; customize it for your own sky sphere
-        {
-            //// create object by reading an obj mesh
-            auto sphere = Add_Obj_Mesh_Object("obj/sphere.obj");
 
-            //// set object's transform
-            Matrix4f t;
-            t << 1, 0, 0, -1.5,
-                0, 1, 0, -1,
-                0, 0, 1, 0.5,
-                0, 0, 0, 1;
-            sphere->Set_Model_Matrix(t);
-
-            //// set object's material
-            sphere->Set_Ka(Vector3f(0.1, 0.1, 0.1));
-            sphere->Set_Kd(Vector3f(0.7, 0.7, 0.7));
-            sphere->Set_Ks(Vector3f(2, 2, 2));
-            sphere->Set_Shininess(128);
-
-            //// bind texture to object
-            sphere->Add_Texture("tex_color", OpenGLTextureLibrary::Get_Texture("sphere_color"));
-            sphere->Add_Texture("tex_normal", OpenGLTextureLibrary::Get_Texture("sphere_normal"));
-
-            //// bind shader to object
-            sphere->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("basic"));
-        }
-
-
-        //// Here we show an example of shading (ray-tracing) a sphere with environment mapping
-        /*
-        {
-            //// create object by reading an obj mesh
-            auto sphere2 = Add_Obj_Mesh_Object("obj/sphere.obj");
-
-            //// set object's transform
-            Matrix4f t;
-            t << .6, 0, 0, 0,
-                0, .6, 0, -.5,
-                0, 0, .6, 1,
-                0, 0, 0, 1;
-            sphere2->Set_Model_Matrix(t);
-
-            //// bind shader to object
-            sphere2->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("environment")); // bind shader to object
-        }
-        */
-
+        Add_Planet({ "sun_color", 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 25.67f });
+        Add_Planet({ "mercury_color", 0.15f, 3.87f, 7.0f, 48.33f, 172.75f, 88.0f, 0.01f, 58.65f });
+        Add_Planet({ "venus_color", 0.28f, 7.23f, 3.39f, 76.68f, 49.31f, 224.7f, 177.4f, -243.0f });
+        Add_Planet({ "earth_color", 0.3f, 10.0f, 0.0f, 163.97f, 358.19f, 365.2f, 23.4f, 1.0f });
+        Add_Planet({ "mars_color", 0.20f, 15.2f, 1.85f, 49.56f, 19.1f, 687.0f, 25.2f, 1.03f });
+        Add_Planet({ "jupiter_color", 0.8f, 52.0f, 1.3f, 100.49f, 18.72f, 4331.0f, 3.1f, 0.41f });
+        Add_Planet({ "saturn_color", 0.7f, 95.8f, 2.48f, 113.69f, 320.38f, 10747.0f, 26.7f, 0.45f });
+        Add_Planet({ "uranus_color", 0.5f, 192.0f, 0.77f, 73.96f, 142.9f, 30589.0f, 97.8f, -0.72f });
+        Add_Planet({ "neptune_color", 0.5f, 300.5f, 1.77f, 131.77f, 266.6f, 59800.0f, 28.3f, 0.67f });
 
         //// This for-loop updates the rendering model for each object on the list
         for (auto &mesh_obj : mesh_object_array){
@@ -201,9 +163,104 @@ public:
         return obj;
     }
 
+    void Add_Planet(PlanetInfo info) 
+    {
+        auto obj = Add_Obj_Mesh_Object("obj/sphere.obj");
+        
+        // Material
+        obj->Set_Ka(Vector3f(0.1, 0.1, 0.1));
+        // obj->Set_Kd(Vector3f(0.7, 0.7, 0.7));
+        // obj->Set_Ks(Vector3f(0.5, 0.5, 0.5));
+        // obj->Set_Shininess(0.1);
+
+        // Bind Texture and Shader
+        obj->Add_Texture("tex_color", OpenGLTextureLibrary::Get_Texture(info.texture_name));
+        obj->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("basic"));
+
+        // Store for physics updates
+        planets.push_back({obj, info});
+    }
+
+    float ToRadian(float deg) { 
+        return deg * (float)M_PI / 180.0f; 
+    }
+
+    Matrix4f GetScaleMatrix(float s) {
+        Matrix4f m; 
+        m << s, 0, 0, 0,  
+             0, s, 0, 0,  
+             0, 0, s, 0,  
+             0, 0, 0, 1; 
+        return m;
+    }
+    Matrix4f GetTranslationMatrix(float x) {
+        Matrix4f m; 
+        m << 1, 0, 0, x,  
+             0, 1, 0, 0,  
+             0, 0, 1, 0,  
+             0, 0, 0, 1; 
+        return m;
+    }
+    Matrix4f GetRotationX(float deg) {
+        float r = ToRadian(deg); 
+        float c = cos(r); 
+        float s = sin(r);
+        Matrix4f m; 
+        m << 1, 0, 0, 0,  
+             0, c, -s, 0,  
+             0, s, c, 0,  
+             0, 0, 0, 1; 
+        return m;
+    }
+    Matrix4f GetRotationY(float deg) {
+        float r = ToRadian(deg); 
+        float c = cos(r); 
+        float s = sin(r);
+        Matrix4f m; 
+        m << c, 0, s, 0,  
+             0, 1, 0, 0,  
+             -s, 0, c, 0,  
+             0, 0, 0, 1; return m;
+    }
+    Matrix4f GetRotationZ(float deg) {
+        float r = ToRadian(deg); 
+        float c = cos(r); 
+        float s = sin(r);
+        Matrix4f m; 
+        m << c, -s, 0, 0,  
+             s, c, 0, 0,  
+             0, 0, 1, 0,  
+             0, 0, 0, 1; 
+        return m;
+    }
+
     //// Go to next frame
     virtual void Toggle_Next_Frame()
     {
+        global_time_days += days_per_frame;
+
+        for (auto &p : planets) {
+            
+            // Calculate angles based on time
+            float orbit_angle = (global_time_days / p.info.orbit_period_days) * 360.0f;
+            float spin_angle = (global_time_days / p.info.axial_period_days) * 360.0f;
+            float current_orbit_pos = p.info.start_anomaly + orbit_angle;
+
+            // Create Transformations
+            Matrix4f m_scale = GetScaleMatrix(p.info.size / 2.5);
+            Matrix4f m_spin = GetRotationY(spin_angle); // Roate around own axis
+            Matrix4f m_tilt = GetRotationZ(p.info.axial_tilt); // Axial tilt
+            Matrix4f m_trans = GetTranslationMatrix(p.info.semi_major_axis / 4); // Orbit radius
+            Matrix4f m_orbit = GetRotationY(current_orbit_pos); // Position along the orbit ring
+            Matrix4f m_inc   = GetRotationZ(p.info.inclination); // Inclination of the orbit plane
+            Matrix4f m_lan   = GetRotationY(p.info.a); // Longitude of Ascending Node (rotate plane around sun)
+
+            // Combine Matrices 
+            Matrix4f final_transform = m_lan * m_inc * m_orbit * m_trans * m_tilt * m_spin * m_scale;
+
+            p.mesh->Set_Model_Matrix(final_transform);
+        }
+
         for (auto &mesh_obj : mesh_object_array)
             mesh_obj->setTime(GLfloat(clock() - startTime) / CLOCKS_PER_SEC);
 

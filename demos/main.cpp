@@ -7,6 +7,7 @@
 #include "OpenGLWindow.h"
 #include "TinyObjLoader.h"
 #include "OpenGLSkybox.h"
+#include "OpenGLParticles.h"
 #include <algorithm>
 #include <iostream>
 #include <random>
@@ -45,11 +46,13 @@ class MyDriver : public OpenGLViewer
     std::vector<OpenGLTriangleMesh *> mesh_object_array;
     OpenGLBgEffect *bgEffect = nullptr;
     OpenGLSkybox *skybox = nullptr;
+    OpenGLParticles<> *sunParticles = nullptr;
     clock_t startTime;
 
     std::vector<Planet> planets;
     float global_time_days = 0.0f;
-    float days_per_frame = 2.0f / 24.0f; // speed of simulation in days per frame - 2 hours per frame
+    float days_per_frame = .05f / 24.0f; // speed of simulation in days per frame - 2 hours per frame
+    OpenGLUbos::Light* sun_light = nullptr;
 
 public:
     virtual void Initialize()
@@ -77,6 +80,7 @@ public:
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/billboard.vert", "shaders/alphablend.frag", "billboard");
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/terrain.vert", "shaders/terrain.frag", "terrain");
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/skybox.vert", "shaders/skybox.frag", "skybox");
+        OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/psize_ucolor.vert", "shaders/psize_ucolor.frag", "psize_ucolor");
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/skybox.vert", "shaders/stars_skybox.frag", "stars_skybox");
 
         //// Load all the textures you need for the scene
@@ -98,6 +102,10 @@ public:
         OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/saturn_color.jpg", "saturn_color");
         OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/uranus_color.jpg", "uranus_color");
         OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/neptune_color.jpg", "neptune_color");
+        
+        // Load normal maps
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/earth_normal.png", "earth_normal");
+        // OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/bunny_normal.png", "bunny_normal");
 
         //// Add the background / environment
         //// Here we provide you with four default options to create the background of your scene:
@@ -114,7 +122,6 @@ public:
             skybox->Initialize();
         }
         
-        //// Background Option (4): Sky sphere
 
         Add_Planet({ "sun_color", 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 25.67f });
         Add_Planet({ "mercury_color", 0.15f, 3.87f, 7.0f, 48.33f, 172.75f, 88.0f, 0.01f, 58.65f });
@@ -134,6 +141,31 @@ public:
             mesh_obj->Initialize();
         }
         Toggle_Play();
+
+        // Setup lighting: clear previous lights and add a sun point light + a fill directional light
+        OpenGLUbos::Clear_Lights();
+        OpenGLUbos::Set_Ambient(glm::vec4(0.04f, 0.04f, 0.05f, 1.0f));
+
+        // add a point light at origin (sun)
+        sun_light = OpenGLUbos::Add_Point_Light(glm::vec3(0.0f, 0.0f, 0.0f));
+        if (sun_light) {
+            sun_light->dif  = glm::vec4(1.0f, 0.9f, 0.7f, 1.0f); 
+            sun_light->spec = glm::vec4(0.5f);
+            sun_light->amb  = glm::vec4(0.05f, 0.04f, 0.03f, 1.0f);
+            sun_light->atten = glm::vec4(1.0f, 0.02f, 0.0f, 0.0f);
+        }
+
+        // add a soft directional fill light
+        {
+            auto dir = OpenGLUbos::Add_Directional_Light(glm::vec3(-0.5f, -0.2f, -1.0f));
+            if (dir) {
+                dir->dif = glm::vec4(0.25f, 0.28f, 0.32f, 1.0f);
+                dir->spec = glm::vec4(0.2f);
+            }
+        }
+
+        // Initialize sun particle system
+        Initialize_SunParticles();
     }
 
     //// add mesh object by reading an .obj file
@@ -167,18 +199,100 @@ public:
     {
         auto obj = Add_Obj_Mesh_Object("obj/sphere.obj");
         
-        // Material
-        obj->Set_Ka(Vector3f(0.1, 0.1, 0.1));
-        // obj->Set_Kd(Vector3f(0.7, 0.7, 0.7));
-        // obj->Set_Ks(Vector3f(0.5, 0.5, 0.5));
-        // obj->Set_Shininess(0.1);
+        // Material - customize per planet type
+        // Special case for sun: emissive appearance (high ambient, no specular)
+        if (info.texture_name == "sun_color") {
+            obj->Set_Ka(Vector3f(0.9, 0.9, 0.8));  // High ambient = self-illuminated
+            obj->Set_Kd(Vector3f(1.0, 1.0, 0.95)); // Full diffuse
+            obj->Set_Ks(Vector3f(0.0, 0.0, 0.0));  // No specular highlights
+            obj->Set_Shininess(1.0);
+        } else {
+            // Regular planets: realistic material values
+            obj->Set_Ka(Vector3f(0.05, 0.05, 0.05)); // Low ambient (lit by sun)
+            obj->Set_Kd(Vector3f(0.8, 0.8, 0.8));    // Good diffuse reflectance
+            obj->Set_Ks(Vector3f(0.3, 0.3, 0.3));    // Moderate specular
+            obj->Set_Shininess(32.0);                 // Nice smooth highlights
+        }
 
         // Bind Texture and Shader
         obj->Add_Texture("tex_color", OpenGLTextureLibrary::Get_Texture(info.texture_name));
+        
+        // Try to load matching normal map if it exists (e.g., earth_color -> earth_normal)
+        std::string normal_name = info.texture_name;
+        size_t color_pos = normal_name.find("_color");
+        if (color_pos != std::string::npos) {
+            normal_name.replace(color_pos, 6, "_normal");
+            auto normal_tex = OpenGLTextureLibrary::Get_Texture(normal_name);
+            if (normal_tex) {
+                obj->Add_Texture("tex_normal", normal_tex);
+            }
+        }
+        
         obj->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("basic"));
 
         // Store for physics updates
         planets.push_back({obj, info});
+    }
+
+    //// Initialize sun particle system
+    void Initialize_SunParticles()
+    {
+        //// Create sun particles
+        sunParticles = Add_Interactive_Object<OpenGLParticles<>>();
+        int N = 800;
+        sunParticles->particles.Resize(N);
+
+        float sunRadius = 1.0f;
+
+        // fill particle arrays
+        for (int i = 0; i < N; ++i) {
+            // Random direction on sphere
+            float z = 2.0f * ((rand() / (float)RAND_MAX) - 0.5f);
+            float phi = 2.0f * M_PI * (rand() / (float)RAND_MAX);
+            float rxy = sqrt(max(0.0f, 1.0f - z*z));
+            Vector3 posDir((real)(rxy * cos(phi)), (real)(rxy * sin(phi)), (real)z);
+            // start slightly above surface
+            float dist = sunRadius * (0.95f + 0.05f * (rand() / (float)RAND_MAX));
+            sunParticles->particles.XRef()[i] = posDir * (real)dist; // position around the sun
+
+            // Velocity outward from surface plus tangent swirl
+            float speed = 0.5f + 1.5f * (rand() / (float)RAND_MAX); // tune
+            Vector3 vel = posDir * (real)speed;
+            Vector3 tangent = Vector3(-posDir.y(), posDir.x(), (real)0.0).normalized();
+            vel += (real)0.2 * ((rand() / (float)RAND_MAX) - 0.5f) * tangent;
+            sunParticles->particles.VRef()[i] = vel;
+
+            sunParticles->particles.CRef()[i] = (real)1.0;
+            sunParticles->particles.RRef()[i] = (real)(0.02f + 0.03f * (rand() / (float)RAND_MAX));
+        }
+
+        // mark particle data refreshed so OpenGLParticles will upload it to the GPU
+        sunParticles->Set_Data_Refreshed();
+
+        // Use a moderate point size for visibility (drivers may clamp very large sizes)
+        sunParticles->Set_Point_Size(64.f);
+
+        // Use a simple point-sprite shader (psize_ucolor) for GPU point sprites as an option
+        sunParticles->shader_programs.clear();
+        sunParticles->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("psize_ucolor"));
+
+        // Try to load a small flare texture; if it exists we'll use textured sprites,
+        // otherwise fall back to plain colored points so particles are visible for debugging.
+        OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/sun_flare.png","sun_flare");
+        auto flare_tex = OpenGLTextureLibrary::Get_Texture("sun_flare");
+        if (flare_tex) {
+            sunParticles->Set_Shading_Mode(ShadingMode::TexAlpha);
+            sunParticles->Add_Texture("tex_color", flare_tex);
+            sunParticles->Set_Color(OpenGLColor(1.0f, 0.7f, 0.2f, 1.0f));
+            sunParticles->Enable_Alpha_Blend();
+        } else {
+            // fallback: untextured colored points (guaranteed to render with existing pipeline)
+            sunParticles->Set_Shading_Mode(ShadingMode::None);
+            sunParticles->Set_Color(OpenGLColor(1.0f, 0.65f, 0.1f, 1.0f));
+        }
+
+        // initialize
+        sunParticles->Initialize();
     }
 
     float ToRadian(float deg) { 
@@ -261,6 +375,14 @@ public:
             p.mesh->Set_Model_Matrix(final_transform);
         }
 
+        // update sun point-light to follow the first planet (sun)
+        if (sun_light && planets.size() > 0) {
+            auto& sun_mesh = planets[0].mesh->model_matrix;
+            glm::vec3 sun_pos = glm::vec3(sun_mesh[3][0], sun_mesh[3][1], sun_mesh[3][2]);
+            sun_light->pos = glm::vec4(sun_pos, 1.0f);
+            OpenGLUbos::Update_Lights_Ubo();
+        }
+
         for (auto &mesh_obj : mesh_object_array)
             mesh_obj->setTime(GLfloat(clock() - startTime) / CLOCKS_PER_SEC);
 
@@ -273,6 +395,16 @@ public:
         if (skybox){
             skybox->setTime(GLfloat(clock() - startTime) / CLOCKS_PER_SEC);
         }   
+
+        if (sunParticles) {
+            float dt = 1.0f / 60.0f; 
+            int N = sunParticles->particles.Size();
+            for (int i = 0; i < N; ++i) {
+                sunParticles->particles.XRef()[i] += sunParticles->particles.VRef()[i] * dt;
+                float dist = sunParticles->particles.XRef()[i].norm();
+            }
+            sunParticles->Set_Data_Refreshed();
+        }
 
         OpenGLViewer::Toggle_Next_Frame();
     }

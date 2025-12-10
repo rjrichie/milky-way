@@ -165,7 +165,7 @@ public:
         }
 
         // Initialize sun particle system
-        Initialize_SunParticles();
+        // Initialize_SunParticles();
     }
 
     //// add mesh object by reading an .obj file

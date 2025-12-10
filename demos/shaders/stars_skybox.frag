@@ -58,7 +58,7 @@ vec3 renderStarsOnSphere(vec3 dir)
 
         float brightness = .02 * projScale * 1.5;
         brightness *= sin(1.5 * t + i) * .5 + .5;
-        vec3 color = vec3(0.15, 0.71, 0.92);
+        vec3 color = vec3(0.4, 0.4, 0.4);
 
         fragColor += renderParticleOnSphere(dir, sdir, brightness, color) * 4.0;
     }

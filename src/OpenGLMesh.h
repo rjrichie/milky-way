@@ -92,8 +92,8 @@ class OpenGLTriangleMesh : public OpenGLMesh<TriangleMesh<3> >
 
 	glm::vec3 ka = glm::vec3(0.1f, 0.1f, 0.1f);		// object mateiral ambient coefficient
 	glm::vec3 kd = glm::vec3(0.7f, 0.7f, 0.7f);		// object material diffuse coefficient
-	glm::vec3 ks = glm::vec3(2.f, 2.f, 2.f);		// object material specular coefficient
-	float shininess = 0.f;							// object material shininess coefficient
+	glm::vec3 ks = glm::vec3(0.5f, 0.5f, 0.5f);		// object material specular coefficient (reduced to avoid excessive highlights)
+	float shininess = 32.f;							// object material shininess coefficient (non-zero avoids specular=1 when exponent=0)
 
 	Array<Vector4f> vtx_color;
 	Array<Vector3> vtx_normal;
@@ -266,6 +266,11 @@ class OpenGLTriangleMesh : public OpenGLMesh<TriangleMesh<3> >
 			shader->Set_Uniform("kd", kd);
 			shader->Set_Uniform("ks", ks);
 			shader->Set_Uniform("shininess", shininess);
+            // also set engine material uniforms expected by shared headers
+            shader->Set_Uniform("mat_amb", glm::vec4(ka, 1.0f));
+            shader->Set_Uniform("mat_dif", glm::vec4(kd, 1.0f));
+            shader->Set_Uniform("mat_spec", glm::vec4(ks, 1.0f));
+            shader->Set_Uniform("mat_shinness", glm::vec4(shininess, 0.0f, 0.0f, 0.0f));
 			Bind_Uniform_Block_To_Ubo(shader,"camera");
 			glBindVertexArray(vao);
 			glDrawElements(GL_TRIANGLES,ele_size,GL_UNSIGNED_INT,0);
@@ -286,6 +291,11 @@ class OpenGLTriangleMesh : public OpenGLMesh<TriangleMesh<3> >
 			shader->Set_Uniform("kd", kd);
 			shader->Set_Uniform("ks", ks);
 			shader->Set_Uniform("shininess", shininess);
+            // also set engine material uniforms
+            shader->Set_Uniform("mat_amb", glm::vec4(ka, 1.0f));
+            shader->Set_Uniform("mat_dif", glm::vec4(kd, 1.0f));
+            shader->Set_Uniform("mat_spec", glm::vec4(ks, 1.0f));
+            shader->Set_Uniform("mat_shinness", glm::vec4(shininess, 0.0f, 0.0f, 0.0f));
 
 			Bind_Uniform_Block_To_Ubo(shader,"camera");
 			glBindVertexArray(vao);
@@ -308,6 +318,11 @@ class OpenGLTriangleMesh : public OpenGLMesh<TriangleMesh<3> >
 			shader->Set_Uniform("kd", kd);
 			shader->Set_Uniform("ks", ks);
 			shader->Set_Uniform("shininess", shininess);
+            // also set engine material uniforms
+            shader->Set_Uniform("mat_amb", glm::vec4(ka, 1.0f));
+            shader->Set_Uniform("mat_dif", glm::vec4(kd, 1.0f));
+            shader->Set_Uniform("mat_spec", glm::vec4(ks, 1.0f));
+            shader->Set_Uniform("mat_shinness", glm::vec4(shininess, 0.0f, 0.0f, 0.0f));
 
 			// bind cube map
 			auto cube_map = OpenGLTextureLibrary::Get_Texture("cube_map");

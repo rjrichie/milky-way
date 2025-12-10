@@ -11,7 +11,7 @@ in vec2 vtx_uv; // [0, 1]
 
 out vec4 frag_color;
 
-#define NUM_STAR 100.
+#define NUM_STAR 500.
 
 // return random vec2 between 0 and 1
 vec2 hash2d(float t)

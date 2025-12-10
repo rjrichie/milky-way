@@ -29,6 +29,9 @@ layout(std140) uniform lights
 	light lt[4];
 };
 
+// include engine-provided material uniforms (mat_amb, mat_dif, mat_spec, mat_shinness)
+~include material;
+
 /*input variables*/
 in vec3 vtx_normal; // vtx normal in world space
 in vec3 vtx_position; // vtx position in world space
@@ -37,20 +40,45 @@ in vec4 vtx_color;
 in vec2 vtx_uv;
 in vec3 vtx_tangent;
 
-uniform vec3 ka;            /* object material ambient */
-uniform vec3 kd;            /* object material diffuse */
-uniform vec3 ks;            /* object material specular */
-uniform float shininess;    /* object material shininess */
+// `mat_amb`, `mat_dif`, `mat_spec`, `mat_shinness` are vec4s defined by the shared header
 
 uniform sampler2D tex_color;   /* texture sampler for color */
 uniform sampler2D tex_normal;   /* texture sampler for normal vector */
+uniform float exposure = 1.0; /* simple exposure control for tone mapping */
 
 /*output variables*/
 out vec4 frag_color;
 
-vec3 shading_texture_with_phong(light li, vec3 e, vec3 p, vec3 s, vec3 n)
+vec3 shading_texture_with_phong(light li, vec3 e, vec3 p, vec3 n)
 {
-    return vec3(0.0);
+    // determine light direction and attenuation
+    vec3 L;
+    float attenuation = 1.0;
+    if (li.att[0] == 0) {
+        // directional light
+        L = normalize(-li.dir.xyz);
+    } else {
+        // point light
+        vec3 lightPos = li.pos.xyz;
+        vec3 toLight = lightPos - p;
+        float dist = length(toLight);
+        L = normalize(toLight);
+        attenuation = 1.0 / (li.atten.x + li.atten.y * dist + li.atten.z * dist * dist + 1e-6);
+    }
+
+    // diffuse term
+    float dif_coef = max(dot(n, L), 0.0);
+    vec3 diffuse = dif_coef * (li.dif.rgb * mat_dif.rgb);
+
+    // specular term
+    vec3 V = normalize(e - p);
+    vec3 H = normalize(L + V);
+    float spec_power = mat_shinness[0];
+    float spec_coef = pow(max(dot(n, H), 0.0), spec_power);
+    vec3 specular = spec_coef * (li.spec.rgb * mat_spec.rgb);
+
+    vec3 color = attenuation * (diffuse + specular);
+    return color;
 }
 
 vec3 read_normal_texture()
@@ -62,13 +90,39 @@ vec3 read_normal_texture()
 
 void main()
 {
-    vec3 e = position.xyz;              //// eye position
-    vec3 p = vtx_position;              //// surface position
-    vec3 N = normalize(vtx_normal);     //// normal vector
-    vec3 T = normalize(vtx_tangent);    //// tangent vector
+    vec3 e = position.xyz;
+    vec3 p = vtx_position;
+    vec3 N = normalize(vtx_normal);
+    vec3 T = normalize(vtx_tangent);
 
     vec3 texture_normal = read_normal_texture();
     vec3 texture_color = texture(tex_color, vtx_uv).rgb;
 
-    frag_color = vec4(texture_color.rgb, 1.0);
+    // build final normal: if normal map present, transform from tangent space to world
+    vec3 Nmap = texture_normal;
+    if(length(Nmap) > 0.0) {
+        vec3 T = normalize(vtx_tangent);
+        vec3 B = normalize(cross(N, T));
+        mat3 TBN = mat3(T, B, N);
+        N = normalize(TBN * Nmap);
+    }
+
+    bool is_emissive = mat_amb.r > 0.8 && mat_spec.r < 0.1;
+    
+    vec3 final_color;
+    if (is_emissive) {
+        final_color = texture_color * 1.5; 
+        frag_color = vec4(final_color, 1.0);
+    } else {
+        vec3 lighting = vec3(0.0);
+        for(int i = 0; i < lt_att[0]; ++i){
+            lighting += shading_texture_with_phong(lt[i], e, p, N);
+        }
+        lighting += amb.rgb * mat_amb.rgb;
+        vec3 hdr = texture_color * lighting * exposure;
+        vec3 mapped = hdr / (hdr + vec3(1.0));
+        vec3 gamma_corrected = pow(clamp(mapped, 0.0, 1.0), vec3(1.0/2.2));
+
+        frag_color = vec4(gamma_corrected, 1.0);
+    }
 }
